@@ -146,7 +146,7 @@ const server = http.createServer((req, res) => {
   res.end("hotwire signal ok\n");
 });
 
-const wss = new WebSocket.Server({ server, perMessageDeflate: false });
+const wss = new WebSocket.Server({ server, path: "/ws", perMessageDeflate: false });
 
 const GAME_QUIET = new Set(["v", "volt", "sfx"]);
 
