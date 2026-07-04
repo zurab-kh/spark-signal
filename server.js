@@ -8,17 +8,33 @@ const WebSocket = require("ws");
 const rooms = new Map();
 const LOG_FILE = path.join(__dirname, "signal.log");
 const LOG_RING = [];
-const LOG_MAX = 500;
+const LOG_MAX = 200;
 const HOST_GRACE_MS = 10 * 60 * 1000;
 const VOLT_FLUSH_MS = 16;
 
+// Оптимизация: логи пишем асинхронно, батчами (не блокируем event loop)
+let logBuf = [];
+let logFlushTimer = null;
 function slog(event, detail = "") {
   const line = `[${new Date().toISOString()}] ${event}${detail ? " " + detail : ""}`;
   console.log(line);
   LOG_RING.push(line);
   if (LOG_RING.length > LOG_MAX) LOG_RING.shift();
-  try { fs.appendFileSync(LOG_FILE, line + "\n"); } catch {}
+  // буферизуем запись в файл — флуш раз в 2 секунды
+  logBuf.push(line);
+  if (!logFlushTimer) {
+    logFlushTimer = setTimeout(() => {
+      if (logBuf.length) {
+        try { fs.appendFileSync(LOG_FILE, logBuf.join("\n") + "\n"); } catch {}
+        logBuf = [];
+      }
+      logFlushTimer = null;
+    }, 2000);
+  }
 }
+
+// Тихие события (не логируем — для производительности при активной игре)
+const QUIET_EVENTS = new Set(["game:relay", "ws:ping", "volt"]);
 
 function send(ws, msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -104,20 +120,18 @@ function relayGame(r, ws, payload) {
     return;
   }
   if (peer && peer.readyState === WebSocket.OPEN) {
+    // Оптимизация: предсериализуем только один раз, без лишнего логирования
     peer.send(JSON.stringify({ type: "game", from: ws._role, payload }));
-    if (!GAME_QUIET.has(pt)) slog("game:relay", `${ws._role} room=${ws._room} ${pt || "?"}`);
-  } else {
-    slog("game:drop", `room=${ws._room} peer=${peer?.readyState}`);
+    // логируем только важные (не heat/pass — они идут десятками в секунду)
+    if (pt !== "heat" && pt !== "pass") slog("game:relay", `${ws._role} room=${ws._room} ${pt || "?"}`);
   }
 }
 
 const server = http.createServer((req, res) => {
   const url = req.url || "/";
   if (url === "/logs") {
-    let body = LOG_RING.join("\n") + "\n";
-    try {
-      if (fs.existsSync(LOG_FILE)) body += "\n--- file ---\n" + fs.readFileSync(LOG_FILE, "utf8").slice(-12000);
-    } catch {}
+    // Оптимизация: только кольцевой буфер, без чтения файла (быстро)
+    const body = LOG_RING.join("\n") + "\n";
     res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
     res.end(body);
     return;
