@@ -240,10 +240,21 @@ wss.on("connection", (ws, req) => {
   if (ws._socket?.setNoDelay) ws._socket.setNoDelay(true);
 
   ws.on("message", (raw) => {
+    const rawStr = rawToString(raw);
+
+    // compact heat: "h|1234" → relay as-is to peer (без JSON parse!)
+    if (rawStr.length > 2 && rawStr[0] === 'h' && rawStr[1] === '|') {
+      const r = rooms.get(ws._room);
+      if (!r) return;
+      const peer = ws._role === "host" ? r.guest : r.host;
+      if (peer && peer.readyState === WebSocket.OPEN) peer.send(rawStr);
+      return;
+    }
+
     if (isCompactVolt(raw)) {
       const r = rooms.get(ws._room);
       if (!r || ws._role !== "host") return;
-      if (guestOpen(r)) queueVolt(r, rawToString(raw));
+      if (guestOpen(r)) queueVolt(r, rawStr);
       return;
     }
 
