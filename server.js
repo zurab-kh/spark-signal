@@ -242,8 +242,8 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (raw) => {
     const rawStr = rawToString(raw);
 
-    // compact ball/paddle: "b|..." или "p|..." → relay без JSON parse
-    if (rawStr.length > 2 && (rawStr[0] === 'b' || rawStr[0] === 'p') && rawStr[1] === '|') {
+    // compact angle: "a|1234" → relay без JSON parse
+    if (rawStr.length > 2 && rawStr[0] === 'a' && rawStr[1] === '|') {
       const r = rooms.get(ws._room);
       if (!r) return;
       const peer = ws._role === "host" ? r.guest : r.host;
